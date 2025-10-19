@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package ycrpc.v1;
+
+option go_package = "ycrpc/proto/gen/ycrpc/v1;ycrpcv1";
+
+message GreetRequest {
+  string name = 1;
+}
+
+message GreetResponse {
+  string greeting = 1;
+}
+
+service GreetService {
+  rpc Greet(GreetRequest) returns (GreetResponse) {}
+}
