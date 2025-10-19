@@ -13,7 +13,7 @@ enum Region {
 }
 
 message SignupRequest {
-  string name = 1;
+  string full_name = 1;
   string email = 2;
   string password = 3;
   Region region = 4;
