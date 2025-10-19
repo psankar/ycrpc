@@ -22,10 +22,10 @@ func main() {
 	// Use h2c so we can serve HTTP/2 without TLS.
 	p.SetUnencryptedHTTP2(true)
 
-	log.Println("Starting server on localhost:8080")
+	log.Println("Starting server on :8080")
 
 	s := http.Server{
-		Addr:      "localhost:8080",
+		Addr:      ":8080",
 		Handler:   mux,
 		Protocols: p,
 	}

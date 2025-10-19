@@ -2,26 +2,24 @@
 
 A demo application showing YugabyteDB and ConnectRPC
 
-## Build Instructions
+## Instructions
 
-- Setup tools
-
-```
-$ go install github.com/bufbuild/buf/cmd/buf@latest
-$ go install github.com/fullstorydev/grpcurl/cmd/grpcurl@latest
-$ go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
-$ go install connectrpc.com/connect/cmd/protoc-gen-connect-go@latest
-```
-
-- Generate libraries
-
-```
-$ cd proto
-proto $ buf lint && buf generate
+```bash
+$ docker compose up
+$ curl -X POST http://localhost:8080/ycrpc.v1.YCRPCService/Signup \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "John Doe",
+    "email": "john.doe@example.com",
+    "password": "securepassword123",
+    "region": "REGION_USA"
+  }'
 ```
 
-- Run the server
+Expected response:
 
-```
-$ go run go/cmd/ycrpc-server.go
+```json
+{
+  "handle": "user_handle_123"
+}
 ```
