@@ -4,14 +4,25 @@ package ycrpc.v1;
 
 option go_package = "ycrpc/proto/gen/ycrpc/v1;ycrpcv1";
 
-message GreetRequest {
+enum Region {
+  REGION_UNSPECIFIED = 0;
+  REGION_USA = 1;
+  REGION_EUR = 2;
+  REGION_IND = 3;
+  REGION_SGP = 4;
+}
+
+message SignupRequest {
   string name = 1;
+  string email = 2;
+  string password = 3;
+  Region region = 4;
 }
 
-message GreetResponse {
-  string greeting = 1;
+message SignupResponse {
+  string handle = 1;
 }
 
-service GreetService {
-  rpc Greet(GreetRequest) returns (GreetResponse) {}
+service YCRPCService {
+  rpc Signup(SignupRequest) returns (SignupResponse) {}
 }
