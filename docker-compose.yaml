@@ -5,3 +5,117 @@ services:
       dockerfile: Dockerfile-backend
     ports:
       - "8080:8080"
+    depends_on:
+      ycrpc-migrations:
+        condition: service_completed_successfully
+
+  # Database Migrations
+  ycrpc-migrations:
+    image: postgres:15
+    container_name: ycrpc-migrations
+    command: |
+      bash -c '
+        set -e
+        echo "Waiting 45 seconds for YugabyteDB cluster to be ready..."
+        sleep 45
+        
+        echo "Running migrations..."
+        if psql -h yugabytedb-node1 -p 5433 -U yugabyte -d yugabyte -v ON_ERROR_STOP=1 -f /migrations/initdb.sql; then
+          echo "Migrations completed successfully!"
+        else
+          echo "ERROR: Migrations failed!"
+          exit 1
+        fi
+      '
+    volumes:
+      - ./migrations:/migrations:ro
+    environment:
+      - PGPASSWORD=yugabyte
+    depends_on:
+      - yugabytedb-node1
+      - yugabytedb-node2
+      - yugabytedb-node3
+      - yugabytedb-node4
+    networks:
+      - ycrpc-network
+    restart: "no"
+
+  # YugabyteDB Node 1 - USA Region
+  yugabytedb-node1:
+    image: yugabytedb/yugabyte:latest
+    container_name: yugabytedb-node1
+    hostname: yugabytedb-node1
+    command: ["bin/yugabyted", "start", "--base_dir=/home/yugabyte/yb_data", "--background=false", "--cloud_location=local.usa.usa-a", "--fault_tolerance=region"]
+    ports:
+      - "15433:15433"  # YSQL port
+      - "7001:7000"    # Master web UI
+      - "9001:9000"    # TServer web UI
+      - "5433:5433"    # PostgreSQL compatible port
+    volumes:
+      - ./vol-usa:/home/yugabyte/yb_data
+    environment:
+      - YSQL_DB=yugabyte
+      - YSQL_USER=yugabyte
+    networks:
+      - ycrpc-network
+
+  # YugabyteDB Node 2 - EUR Region  
+  yugabytedb-node2:
+    image: yugabytedb/yugabyte:latest
+    container_name: yugabytedb-node2
+    hostname: yugabytedb-node2
+    command: ["sh", "-c", "sleep 10 && bin/yugabyted start --join=yugabytedb-node1 --base_dir=/home/yugabyte/yb_data --background=false --cloud_location=local.eur.eur-a --fault_tolerance=region"]
+    ports:
+      - "15434:15433"  # YSQL port
+      - "7002:7000"    # Master web UI
+      - "9002:9000"    # TServer web UI
+      - "5434:5433"    # PostgreSQL compatible port
+    volumes:
+      - ./vol-eur:/home/yugabyte/yb_data
+    depends_on:
+      - yugabytedb-node1
+    networks:
+      - ycrpc-network
+    restart: on-failure
+
+  # YugabyteDB Node 3 - IND Region
+  yugabytedb-node3:
+    image: yugabytedb/yugabyte:latest
+    container_name: yugabytedb-node3
+    hostname: yugabytedb-node3
+    command: ["sh", "-c", "sleep 10 && bin/yugabyted start --join=yugabytedb-node1 --base_dir=/home/yugabyte/yb_data --background=false --cloud_location=local.ind.ind-a --fault_tolerance=region"]
+    ports:
+      - "15435:15433"  # YSQL port
+      - "7003:7000"    # Master web UI
+      - "9003:9000"    # TServer web UI
+      - "5435:5433"    # PostgreSQL compatible port
+    volumes:
+      - ./vol-ind:/home/yugabyte/yb_data
+    depends_on:
+      - yugabytedb-node1
+    networks:
+      - ycrpc-network
+    restart: on-failure
+
+  # YugabyteDB Node 4 - SGP Region
+  yugabytedb-node4:
+    image: yugabytedb/yugabyte:latest
+    container_name: yugabytedb-node4
+    hostname: yugabytedb-node4
+    command: ["sh", "-c", "sleep 10 && bin/yugabyted start --join=yugabytedb-node1 --base_dir=/home/yugabyte/yb_data --background=false --cloud_location=local.sgp.sgp-a --fault_tolerance=region"]
+    ports:
+      - "15436:15433"  # YSQL port
+      - "7004:7000"    # Master web UI
+      - "9004:9000"    # TServer web UI
+      - "5436:5433"    # PostgreSQL compatible port
+    volumes:
+      - ./vol-sgp:/home/yugabyte/yb_data
+    depends_on:
+      - yugabytedb-node1
+    networks:
+      - ycrpc-network
+    restart: on-failure
+
+networks:
+  ycrpc-network:
+    driver: bridge
