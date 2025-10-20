@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package ycrpc.v1;
 
+import "buf/validate/validate.proto";
+
 option go_package = "ycrpc/proto/gen/ycrpc/v1;ycrpcv1";
 
 enum Region {
@@ -13,10 +15,23 @@ enum Region {
 }
 
 message SignupRequest {
-  string full_name = 1;
-  string email = 2;
-  string password = 3;
-  Region region = 4;
+  string full_name = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z\\s\\-\\.]+$"
+  }];
+
+  string email = 2 [(buf.validate.field).string.email = true];
+
+  string password = 3 [(buf.validate.field).string = {
+    min_len: 8
+    max_len: 128
+  }];
+
+  Region region = 4 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0] /* REGION_UNSPECIFIED is not allowed */
+  }];
 }
 
 message SignupResponse {

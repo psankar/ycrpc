@@ -8,6 +8,10 @@ services:
     depends_on:
       ycrpc-migrations:
         condition: service_completed_successfully
+    environment:
+      - DATABASE_URL=postgres://yugabyte:yugabyte@yugabytedb-node1:5433,yugabytedb-node2:5433,yugabytedb-node3:5433,yugabytedb-node4:5433/yugabyte
+    networks:
+      - ycrpc-network
 
   # Database Migrations
   ycrpc-migrations:

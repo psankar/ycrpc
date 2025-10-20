@@ -11,9 +11,13 @@ import (
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
-	server := &server.Server{}
-	mux := http.NewServeMux()
+	server, err := server.NewServer()
+	if err != nil {
+		log.Fatalf("failed to create server: %v", err)
+		return
+	}
 
+	mux := http.NewServeMux()
 	path, handler := ycrpcv1connect.NewYCRPCServiceHandler(server)
 	mux.Handle(path, handler)
 
