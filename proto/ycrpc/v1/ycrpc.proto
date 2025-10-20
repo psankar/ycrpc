@@ -38,16 +38,36 @@ message SignupResponse {
   string handle = 1;
 }
 
-// In case of errors, the Returns will have standard gRPC status codes
-// https://grpc.io/docs/guides/status-codes/
+// Error detail message used with INVALID_ARGUMENT responses via Connect errors.
+// Carries the list of invalid field names.
+message InvalidFields {
+  repeated string fields = 1;
+}
+
+// Errors are returned using Connect's error model, which maps to gRPC status codes
+// and supports typed protobuf error details attached with AddDetail.
+// See: https://connectrpc.com/docs/go/errors and https://grpc.io/docs/guides/status-codes/
 service YCRPCService {
   // Signup creates a new user account.
   //
-  // Error codes:
+  // Error handling (Connect):
   //   - INVALID_ARGUMENT (code 3):
-  //       Details contain an array of invalid fields, such as:
-  //       ["email", "password", "full_name", "region"]
-  //   - ALREADY_EXISTS (code 6): User with this email address already exists
-  //   - INTERNAL (code 13): Unexpected server error occurred
+  //       Returns a ycrpc.v1.InvalidFields detail listing invalid field names.
+  //       Message is a short summary like "invalid request". Example JSON:
+  //       {
+  //         "code": "invalid_argument",
+  //         "message": "invalid request",
+  //         "details": [
+  //           {
+  //             "@type": "type.googleapis.com/ycrpc.v1.InvalidFields",
+  //             "fields": ["email", "password"]
+  //           }
+  //         ]
+  //       }
+  //   - ALREADY_EXISTS (code 6):
+  //       Message: "user with this email address already exists".
+  //       Details are optional and typically omitted.
+  //   - INTERNAL (code 13):
+  //       Message is empty and no details are returned.
   rpc Signup(SignupRequest) returns (SignupResponse) {}
 }

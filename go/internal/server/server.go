@@ -13,11 +13,11 @@ import (
 	ycrpcv1 "ycrpc/proto/gen/ycrpc/v1"
 
 	"buf.build/go/protovalidate"
+	"connectrpc.com/connect"
 	"github.com/yugabyte/pgx/v5/pgconn"
 	"github.com/yugabyte/pgx/v5/pgxpool"
 	"golang.org/x/crypto/bcrypt"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
+	// no external error-details needed; use our own InvalidFields detail type
 )
 
 type server struct {
@@ -57,25 +57,27 @@ func NewServer() (*server, error) {
 }
 
 func (s *server) Signup(ctx context.Context, req *ycrpcv1.SignupRequest) (*ycrpcv1.SignupResponse, error) {
-	// Validate request using protovalidate
 	if err := s.validator.Validate(req); err != nil {
 		slog.Debug("validation failed", "error", err)
 
-		failedFields := []string{}
-
-		// Extract field names from validation error
+		fields := make([]string, 0, 4)
 		if valErr, ok := err.(*protovalidate.ValidationError); ok {
 			for _, violation := range valErr.Violations {
 				if fieldPath := violation.Proto.GetField(); fieldPath != nil {
 					elements := fieldPath.GetElements()
 					if len(elements) > 0 {
-						failedFields = append(failedFields, elements[0].GetFieldName())
+						fields = append(fields, elements[0].GetFieldName())
 					}
 				}
 			}
 		}
 
-		return nil, status.Error(codes.InvalidArgument, fmt.Sprintf("%v", failedFields))
+		detail := &ycrpcv1.InvalidFields{Fields: fields}
+		cerr := connect.NewError(connect.CodeInvalidArgument, errors.New("invalid request"))
+		if det, derr := connect.NewErrorDetail(detail); derr == nil {
+			cerr.AddDetail(det)
+		}
+		return nil, cerr
 	}
 
 	// Convert protobuf region enum to database string
@@ -91,19 +93,23 @@ func (s *server) Signup(ctx context.Context, req *ycrpcv1.SignupRequest) (*ycrpc
 		regionStr = "sgp"
 	default:
 		// This should never happen due to protovalidate validation
-		return nil, status.Error(codes.InvalidArgument, "[region]")
+		cerr := connect.NewError(connect.CodeInvalidArgument, errors.New("invalid request"))
+		if det, derr := connect.NewErrorDetail(&ycrpcv1.InvalidFields{Fields: []string{"region"}}); derr == nil {
+			cerr.AddDetail(det)
+		}
+		return nil, cerr
 	}
 
 	handle, err := generateHandle(req.FullName, regionStr)
 	if err != nil {
-		return nil, status.Error(codes.Internal, "")
+		return nil, connect.NewError(connect.CodeInternal, errors.New(""))
 	}
 
 	// Hash password
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
 		slog.Error("failed to hash password", "error", err)
-		return nil, status.Error(codes.Internal, "")
+		return nil, connect.NewError(connect.CodeInternal, errors.New(""))
 	}
 
 	// Insert user into appropriate regional partition
@@ -119,11 +125,11 @@ func (s *server) Signup(ctx context.Context, req *ycrpcv1.SignupRequest) (*ycrpc
 			// PostgreSQL error code 23505 is unique_violation
 			if pgErr.Code == "23505" {
 				slog.Debug("duplicate email address", "email", req.Email)
-				return nil, status.Error(codes.AlreadyExists, "user with this email address already exists")
+				return nil, connect.NewError(connect.CodeAlreadyExists, fmt.Errorf("user with this email address already exists"))
 			}
 		}
 		slog.Error("failed to insert user", "error", err, "region", regionStr, "handle", handle)
-		return nil, status.Error(codes.Internal, "")
+		return nil, connect.NewError(connect.CodeInternal, errors.New(""))
 	}
 
 	slog.Info("user created successfully", "handle", handle, "region", regionStr)
