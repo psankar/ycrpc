@@ -4,24 +4,50 @@ A demo application showing YugabyteDB and ConnectRPC
 
 ## Instructions
 
-```bash
-$ docker compose up
+```
+$ docker-compose down; rm -rf vol-*; docker compose up --build
+
+
+# Validation failure
+====================
 $ curl -X POST http://localhost:8080/ycrpc.v1.YCRPCService/Signup \
   -H "Content-Type: application/json" \
   -d '{
-    "name": "John Doe",
+    "full_name": "John Doe",
     "email": "john.doe@example.com",
-    "password": "securepassword123",
+    "password": "pass",
     "region": "REGION_USA"
   }'
-```
 
-Expected response:
+{"code":"invalid_argument","message":"invalid request","details":[{"type":"ycrpc.v1.InvalidFields","value":"CghwYXNzd29yZA","debug":{"fields":["password"]}}]}
 
-```json
-{
-  "handle": "user_handle_123"
-}
+
+# Create a new User
+===================
+$ curl -X POST http://localhost:8080/ycrpc.v1.YCRPCService/Signup \
+  -H "Content-Type: application/json" \
+  -d '{
+    "full_name": "John Doe",
+    "email": "john.doe@example.com",
+    "password": "passwordstronger",
+    "region": "REGION_USA"
+  }'
+
+{"handle":"johndo-1760982292cd4cb4abe0b1-usa"}
+
+
+# Failure to create duplicate user
+==================================
+$ curl -X POST http://localhost:8080/ycrpc.v1.YCRPCService/Signup \
+  -H "Content-Type: application/json" \
+  -d '{
+    "full_name": "John Doe",
+    "email": "john.doe@example.com",
+    "password": "passwordstronger",
+    "region": "REGION_USA"
+  }'
+
+{"code":"already_exists","message":"user with this email address already exists"}
 ```
 
 ## Database Access
