@@ -55,7 +55,7 @@ func NewServer() (*server, error) {
 func (s *server) Signup(ctx context.Context, req *ycrpcv1.SignupRequest) (*ycrpcv1.SignupResponse, error) {
 	// Validate request using protovalidate
 	if err := s.validator.Validate(req); err != nil {
-		slog.Error("validation failed", "error", err)
+		slog.Debug("validation failed", "error", err)
 		return nil, fmt.Errorf("validation failed: %w", err)
 	}
 
