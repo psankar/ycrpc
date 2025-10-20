@@ -23,7 +23,7 @@ COPY proto/ ./proto/
 
 # Generate protobuf and connect libraries
 WORKDIR /app/proto
-RUN buf mod update && buf lint && buf generate
+RUN buf dep update && buf lint && buf generate
 
 # Copy the rest of the application
 WORKDIR /app

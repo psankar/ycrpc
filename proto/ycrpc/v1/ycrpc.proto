@@ -38,6 +38,16 @@ message SignupResponse {
   string handle = 1;
 }
 
+// In case of errors, the Returns will have standard gRPC status codes
+// https://grpc.io/docs/guides/status-codes/
 service YCRPCService {
+  // Signup creates a new user account.
+  //
+  // Error codes:
+  //   - INVALID_ARGUMENT (code 3):
+  //       Details contain an array of invalid fields, such as:
+  //       ["email", "password", "full_name", "region"]
+  //   - ALREADY_EXISTS (code 6): User with this email address already exists
+  //   - INTERNAL (code 13): Unexpected server error occurred
   rpc Signup(SignupRequest) returns (SignupResponse) {}
 }

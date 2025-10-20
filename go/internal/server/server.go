@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -12,8 +13,11 @@ import (
 	ycrpcv1 "ycrpc/proto/gen/ycrpc/v1"
 
 	"buf.build/go/protovalidate"
+	"github.com/yugabyte/pgx/v5/pgconn"
 	"github.com/yugabyte/pgx/v5/pgxpool"
 	"golang.org/x/crypto/bcrypt"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 type server struct {
@@ -56,7 +60,22 @@ func (s *server) Signup(ctx context.Context, req *ycrpcv1.SignupRequest) (*ycrpc
 	// Validate request using protovalidate
 	if err := s.validator.Validate(req); err != nil {
 		slog.Debug("validation failed", "error", err)
-		return nil, fmt.Errorf("validation failed: %w", err)
+
+		failedFields := []string{}
+
+		// Extract field names from validation error
+		if valErr, ok := err.(*protovalidate.ValidationError); ok {
+			for _, violation := range valErr.Violations {
+				if fieldPath := violation.Proto.GetField(); fieldPath != nil {
+					elements := fieldPath.GetElements()
+					if len(elements) > 0 {
+						failedFields = append(failedFields, elements[0].GetFieldName())
+					}
+				}
+			}
+		}
+
+		return nil, status.Error(codes.InvalidArgument, fmt.Sprintf("%v", failedFields))
 	}
 
 	// Convert protobuf region enum to database string
@@ -72,20 +91,19 @@ func (s *server) Signup(ctx context.Context, req *ycrpcv1.SignupRequest) (*ycrpc
 		regionStr = "sgp"
 	default:
 		// This should never happen due to protovalidate validation
-		return nil, fmt.Errorf("invalid region specified")
+		return nil, status.Error(codes.InvalidArgument, "[region]")
 	}
 
 	handle, err := generateHandle(req.FullName, regionStr)
 	if err != nil {
-		slog.Error("failed to generate handle", "error", err)
-		return nil, fmt.Errorf("internal error")
+		return nil, status.Error(codes.Internal, "")
 	}
 
 	// Hash password
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
 		slog.Error("failed to hash password", "error", err)
-		return nil, fmt.Errorf("failed to process password")
+		return nil, status.Error(codes.Internal, "")
 	}
 
 	// Insert user into appropriate regional partition
@@ -96,14 +114,20 @@ func (s *server) Signup(ctx context.Context, req *ycrpcv1.SignupRequest) (*ycrpc
 
 	_, err = s.pool.Exec(ctx, query, regionStr, handle, req.FullName, req.Email, string(hashedPassword))
 	if err != nil {
+		// Check if error is due to unique constraint violation (duplicate email)
+		if pgErr, ok := err.(*pgconn.PgError); ok {
+			// PostgreSQL error code 23505 is unique_violation
+			if pgErr.Code == "23505" {
+				slog.Debug("duplicate email address", "email", req.Email)
+				return nil, status.Error(codes.AlreadyExists, "user with this email address already exists")
+			}
+		}
 		slog.Error("failed to insert user", "error", err, "region", regionStr, "handle", handle)
-		return nil, fmt.Errorf("failed to create user account")
+		return nil, status.Error(codes.Internal, "")
 	}
 
 	slog.Info("user created successfully", "handle", handle, "region", regionStr)
-	return &ycrpcv1.SignupResponse{
-		Handle: handle,
-	}, nil
+	return &ycrpcv1.SignupResponse{Handle: handle}, nil
 }
 
 func generateHandle(fullName, region string) (string, error) {
@@ -111,11 +135,9 @@ func generateHandle(fullName, region string) (string, error) {
 	// Add current unix timestamp to ensure uniqueness
 	// Add random bytes read from crypto/rand for extra uniqueness
 	// Append region code at the end
-	// Format: <name>-<unixTimestamp><randomBytes>-<region>
+	// Format: <sanitizedName>-<unixTimestamp><randomBytes>-<region>
 
-	// Normalize full name: lowercase, URL-safe, max 6 chars, padded if shorter
 	name := strings.ToLower(fullName)
-
 	// Remove non-printable and non-URL-safe characters (keep only alphanumeric)
 	sanitized := ""
 	for _, r := range name {
@@ -133,7 +155,8 @@ func generateHandle(fullName, region string) (string, error) {
 		randomBytes := make([]byte, 1)
 		_, err := rand.Read(randomBytes)
 		if err != nil {
-			return "", fmt.Errorf("failed to generate random character: %w", err)
+			slog.Error("failed to generate random character", "error", err)
+			return "", errors.New("")
 		}
 		sanitized += string(alphanumeric[int(randomBytes[0])%len(alphanumeric)])
 	}
@@ -147,7 +170,8 @@ func generateHandle(fullName, region string) (string, error) {
 	randomBytes := make([]byte, 6)
 	_, err := rand.Read(randomBytes)
 	if err != nil {
-		return "", fmt.Errorf("failed to generate random bytes: %w", err)
+		slog.Error("failed to generate random bytes", "error", err)
+		return "", errors.New("")
 	}
 
 	// Convert random bytes to hex string
