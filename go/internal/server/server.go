@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -112,25 +113,63 @@ func (s *server) Signup(ctx context.Context, req *ycrpcv1.SignupRequest) (*ycrpc
 		return nil, connect.NewError(connect.CodeInternal, errors.New(""))
 	}
 
-	// Insert user into appropriate regional partition
-	query := `
-		INSERT INTO users (region, long_handle, full_name, email_address, password_hash) 
-		VALUES ($1, $2, $3, $4, $5)
-	`
-
-	_, err = s.pool.Exec(ctx, query, regionStr, handle, req.FullName, req.Email, string(hashedPassword))
+	// Start a transaction so we insert into users and global_email_addresses atomically.
+	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		// Check if error is due to unique constraint violation (duplicate email)
+		slog.Error("failed to begin transaction", "error", err)
+		return nil, connect.NewError(connect.CodeInternal, errors.New(""))
+	}
+	// Ensure rollback if anything goes wrong. If commit succeeds we'll set tx = nil to avoid rollback.
+	defer func() {
+		if tx != nil {
+			_ = tx.Rollback(ctx)
+		}
+	}()
+
+	// Insert user and return generated id
+	var userID string
+	insertUserQuery := `INSERT INTO users (region, long_handle, full_name, email_address, password_hash) VALUES ($1, $2, $3, $4, $5) RETURNING id`
+	if err := tx.QueryRow(ctx, insertUserQuery, regionStr, handle, req.FullName, req.Email, string(hashedPassword)).Scan(&userID); err != nil {
 		if pgErr, ok := err.(*pgconn.PgError); ok {
-			// PostgreSQL error code 23505 is unique_violation
 			if pgErr.Code == "23505" {
-				slog.Debug("duplicate email address", "email", req.Email)
-				return nil, connect.NewError(connect.CodeAlreadyExists, fmt.Errorf("user with this email address already exists"))
+				if pgErr.ConstraintName == "uniq_handle" {
+					slog.Error("duplicate long_handle generated", "handle", handle)
+					return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("user with this handle already exists"))
+				} else {
+					slog.Error("unknown unique violation", "constraint", pgErr.ConstraintName, "error", err)
+					return nil, connect.NewError(connect.CodeInternal, errors.New(""))
+				}
 			}
 		}
 		slog.Error("failed to insert user", "error", err, "region", regionStr, "handle", handle)
 		return nil, connect.NewError(connect.CodeInternal, errors.New(""))
 	}
+
+	// Compute SHA256 of the (normalized) email address to store in global_email_addresses
+	emailNorm := strings.ToLower(strings.TrimSpace(req.Email))
+	sum := sha256.Sum256([]byte(emailNorm))
+	emailSha := hex.EncodeToString(sum[:])
+
+	// Insert into global_email_addresses to enforce a global-unique email across regions
+	insertGlobal := `INSERT INTO global_email_addresses (email_address_sha, region, user_id) VALUES ($1, $2, $3)`
+	if _, err := tx.Exec(ctx, insertGlobal, emailSha, regionStr, userID); err != nil {
+		if pgErr, ok := err.(*pgconn.PgError); ok {
+			if pgErr.Code == "23505" {
+				slog.Debug("duplicate email address", "email", req.Email)
+				return nil, connect.NewError(connect.CodeAlreadyExists, fmt.Errorf("user with this email address already exists"))
+			}
+		}
+		slog.Error("failed to insert global email address", "error", err, "email", req.Email)
+		return nil, connect.NewError(connect.CodeInternal, errors.New(""))
+	}
+
+	// Commit the transaction
+	if err := tx.Commit(ctx); err != nil {
+		slog.Error("failed to commit transaction", "error", err)
+		return nil, connect.NewError(connect.CodeInternal, errors.New(""))
+	}
+	// Mark tx as nil so deferred rollback doesn't run
+	tx = nil
 
 	slog.Info("user created successfully", "handle", handle, "region", regionStr)
 	return &ycrpcv1.SignupResponse{Handle: handle}, nil
