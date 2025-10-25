@@ -38,7 +38,7 @@ func NewServer() (*server, error) {
 	// Enable YugabyteDB smart driver features for geo-partitioning
 	// load_balance=true enables cluster-aware load balancing
 	// yb_servers_refresh_interval refreshes the server list periodically
-	databaseURL += "?load_balance=true&yb_servers_refresh_interval=300"
+	// databaseURL += "?load_balance=true&yb_servers_refresh_interval=300"
 
 	// Create connection pool with YugabyteDB smart driver
 	pool, err := pgxpool.New(context.Background(), databaseURL)
