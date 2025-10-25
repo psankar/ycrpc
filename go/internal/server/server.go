@@ -11,14 +11,15 @@ import (
 	"os"
 	"strings"
 	"time"
+
 	ycrpcv1 "ycrpc/proto/gen/ycrpc/v1"
+	"ycrpc/sqlc/db"
 
 	"buf.build/go/protovalidate"
 	"connectrpc.com/connect"
-	"github.com/yugabyte/pgx/v5/pgconn"
-	"github.com/yugabyte/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/crypto/bcrypt"
-	// no external error-details needed; use our own InvalidFields detail type
 )
 
 type server struct {
@@ -37,7 +38,7 @@ func NewServer() (*server, error) {
 	// Enable YugabyteDB smart driver features for geo-partitioning
 	// load_balance=true enables cluster-aware load balancing
 	// yb_servers_refresh_interval refreshes the server list periodically
-	databaseURL += "?load_balance=true&yb_servers_refresh_interval=300"
+	// databaseURL += "?load_balance=true&yb_servers_refresh_interval=300"
 
 	// Create connection pool with YugabyteDB smart driver
 	pool, err := pgxpool.New(context.Background(), databaseURL)
@@ -82,15 +83,20 @@ func (s *server) Signup(ctx context.Context, req *ycrpcv1.SignupRequest) (*ycrpc
 	}
 
 	// Convert protobuf region enum to database string
+	var region db.Region
 	var regionStr string
 	switch req.Region {
 	case ycrpcv1.Region_REGION_USA:
+		region = db.RegionUsa
 		regionStr = "usa"
 	case ycrpcv1.Region_REGION_EUR:
+		region = db.RegionEur
 		regionStr = "eur"
 	case ycrpcv1.Region_REGION_IND:
+		region = db.RegionInd
 		regionStr = "ind"
 	case ycrpcv1.Region_REGION_SGP:
+		region = db.RegionSgp
 		regionStr = "sgp"
 	default:
 		// This should never happen due to protovalidate validation
@@ -126,10 +132,17 @@ func (s *server) Signup(ctx context.Context, req *ycrpcv1.SignupRequest) (*ycrpc
 		}
 	}()
 
+	queries := db.New(s.pool).WithTx(tx)
+
 	// Insert user and return generated id
-	var userID string
-	insertUserQuery := `INSERT INTO users (region, long_handle, full_name, email_address, password_hash) VALUES ($1, $2, $3, $4, $5) RETURNING id`
-	if err := tx.QueryRow(ctx, insertUserQuery, regionStr, handle, req.FullName, req.Email, string(hashedPassword)).Scan(&userID); err != nil {
+	userID, err := queries.InsertUser(ctx, db.InsertUserParams{
+		Region:       region,
+		LongHandle:   handle,
+		FullName:     req.FullName,
+		EmailAddress: req.Email,
+		PasswordHash: string(hashedPassword),
+	})
+	if err != nil {
 		if pgErr, ok := err.(*pgconn.PgError); ok {
 			if pgErr.Code == "23505" {
 				if pgErr.ConstraintName == "uniq_handle" {
@@ -151,8 +164,12 @@ func (s *server) Signup(ctx context.Context, req *ycrpcv1.SignupRequest) (*ycrpc
 	emailSha := hex.EncodeToString(sum[:])
 
 	// Insert into global_email_addresses to enforce a global-unique email across regions
-	insertGlobal := `INSERT INTO global_email_addresses (email_address_sha, region, user_id) VALUES ($1, $2, $3)`
-	if _, err := tx.Exec(ctx, insertGlobal, emailSha, regionStr, userID); err != nil {
+	err = queries.InsertGlobalEmail(ctx, db.InsertGlobalEmailParams{
+		EmailAddressSha: emailSha,
+		Region:          region,
+		UserID:          userID,
+	})
+	if err != nil {
 		if pgErr, ok := err.(*pgconn.PgError); ok {
 			if pgErr.Code == "23505" {
 				slog.Debug("duplicate email address", "email", req.Email)

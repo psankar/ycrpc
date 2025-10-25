@@ -5,7 +5,7 @@ A demo application showing YugabyteDB and ConnectRPC
 ## Instructions
 
 ```
-$ docker-compose down; rm -rf vol-*; docker compose up --build
+$ docker compose down; rm -rf vol-*; docker compose up --build
 
 
 # Validation failure
@@ -106,14 +106,14 @@ You can also access the YugabyteDB web interfaces:
 
 ## IDE Support
 
-You would need to generate the proto libraries for the code to work fine in the IDE. For that you need to download the `buf` tools once and generate the libraries everytime you change the .proto files.
-
-```
+```bash
 # Install tools once
 $ go install github.com/bufbuild/buf/cmd/buf@latest
 $ go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
 $ go install connectrpc.com/connect/cmd/protoc-gen-connect-go@latest
+$ go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
 
-# Generate the libraries from proto
+# Generate the libraries
 $ cd proto && rm -rf gen && buf lint && buf generate
+$ cd sqlc && sqlc generate
 ```
