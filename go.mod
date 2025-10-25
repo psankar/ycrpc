@@ -7,7 +7,6 @@ require (
 	buf.build/go/protovalidate v1.0.0
 	connectrpc.com/connect v1.19.1
 	github.com/jackc/pgx/v5 v5.7.6
-	github.com/yugabyte/pgx/v5 v5.5.3-yb-5
 	golang.org/x/crypto v0.40.0
 	google.golang.org/protobuf v1.36.10
 )

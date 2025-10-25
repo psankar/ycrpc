@@ -17,8 +17,8 @@ import (
 
 	"buf.build/go/protovalidate"
 	"connectrpc.com/connect"
-	"github.com/yugabyte/pgx/v5/pgconn"
-	"github.com/yugabyte/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/crypto/bcrypt"
 )
 

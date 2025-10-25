@@ -32,7 +32,7 @@ services:
         fi
       '
     volumes:
-      - ./migrations:/migrations:ro
+      - ./sqlc/migrations:/migrations:ro
     environment:
       - PGPASSWORD=yugabyte
     depends_on:

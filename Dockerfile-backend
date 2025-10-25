@@ -13,18 +13,21 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 
-# Install sqlc
+# sqlc
 RUN go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
-
 # Install buf and required protoc plugins
 RUN go install github.com/bufbuild/buf/cmd/buf@latest && \
   go install google.golang.org/protobuf/cmd/protoc-gen-go@latest && \
   go install connectrpc.com/connect/cmd/protoc-gen-connect-go@latest
 
-# Copy proto files and buf configuration
-COPY proto/ ./proto/
+# Copy SQLC files and generate libraries
+COPY sqlc/ ./sqlc/
+WORKDIR /app/sqlc
+RUN sqlc generate
 
-# Generate protobuf and connect libraries
+# Copy proto files and buf configuration
+WORKDIR /app
+COPY proto/ ./proto/
 WORKDIR /app/proto
 RUN buf dep update && buf lint && buf generate
 
