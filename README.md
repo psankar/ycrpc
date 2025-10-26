@@ -2,9 +2,9 @@
 
 A demo application showing YugabyteDB and ConnectRPC
 
-## Instructions
+# Instructions
 
-```
+```bash
 $ docker compose down; rm -rf vol-*; docker compose up --build
 ```
 
@@ -13,11 +13,11 @@ The application will be available at:
 - Backend API: http://localhost:8080
 - Frontend UI: http://localhost:3000
 
-### API Examples
+## API Examples
 
-# Validation failure
+### Validation failure
 
-====================
+```bash
 $ curl -X POST http://localhost:8080/ycrpc.v1.YCRPCService/Signup \
  -H "Content-Type: application/json" \
  -d '{
@@ -28,10 +28,11 @@ $ curl -X POST http://localhost:8080/ycrpc.v1.YCRPCService/Signup \
 }'
 
 {"code":"invalid_argument","message":"invalid request","details":[{"type":"ycrpc.v1.InvalidFields","value":"CghwYXNzd29yZA","debug":{"fields":["password"]}}]}
+```
 
-# Create a new User
+### Create a new User
 
-===================
+```bash
 $ curl -X POST http://localhost:8080/ycrpc.v1.YCRPCService/Signup \
  -H "Content-Type: application/json" \
  -d '{
@@ -42,10 +43,11 @@ $ curl -X POST http://localhost:8080/ycrpc.v1.YCRPCService/Signup \
 }'
 
 {"handle":"johndo-1760982292cd4cb4abe0b1-usa"}
+```
 
-# Failure to create duplicate user
+### Failure to create duplicate user
 
-==================================
+```bash
 $ curl -X POST http://localhost:8080/ycrpc.v1.YCRPCService/Signup \
  -H "Content-Type: application/json" \
  -d '{
@@ -56,10 +58,9 @@ $ curl -X POST http://localhost:8080/ycrpc.v1.YCRPCService/Signup \
 }'
 
 {"code":"already_exists","message":"user with this email address already exists"}
+```
 
-````
-
-## Database Access
+# Database Access
 
 After running `docker compose up`, you can connect to the YugabyteDB cluster and explore the geo-partitioned data:
 
@@ -73,7 +74,7 @@ $ docker exec -it yugabytedb-node1 ysqlsh -h yugabytedb-node1 -U yugabyte
 $ docker exec -it yugabytedb-node2 ysqlsh -h yugabytedb-node2 -U yugabyte
 $ docker exec -it yugabytedb-node3 ysqlsh -h yugabytedb-node3 -U yugabyte
 $ docker exec -it yugabytedb-node4 ysqlsh -h yugabytedb-node4 -U yugabyte
-````
+```
 
 ### Explore Sample Data
 
@@ -102,7 +103,7 @@ UNION ALL
 SELECT 'users_sgp' as partition, count(*) FROM users_sgp;
 ```
 
-### Web UI Access
+### Database Web UI Access
 
 You can also access the YugabyteDB web interfaces:
 
@@ -113,7 +114,7 @@ You can also access the YugabyteDB web interfaces:
   - IND: http://localhost:9003
   - SGP: http://localhost:9004
 
-## IDE Support
+# IDE Support
 
 For local development with proper IDE code navigation, you need to generate the protobuf code locally:
 
