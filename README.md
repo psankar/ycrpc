@@ -6,49 +6,58 @@ A demo application showing YugabyteDB and ConnectRPC
 
 ```
 $ docker compose down; rm -rf vol-*; docker compose up --build
+```
 
+The application will be available at:
+
+- Backend API: http://localhost:8080
+- Frontend UI: http://localhost:3000
+
+### API Examples
 
 # Validation failure
+
 ====================
 $ curl -X POST http://localhost:8080/ycrpc.v1.YCRPCService/Signup \
-  -H "Content-Type: application/json" \
-  -d '{
-    "full_name": "John Doe",
-    "email": "john.doe@example.com",
-    "password": "pass",
-    "region": "REGION_USA"
-  }'
+ -H "Content-Type: application/json" \
+ -d '{
+"full_name": "John Doe",
+"email": "john.doe@example.com",
+"password": "pass",
+"region": "REGION_USA"
+}'
 
 {"code":"invalid_argument","message":"invalid request","details":[{"type":"ycrpc.v1.InvalidFields","value":"CghwYXNzd29yZA","debug":{"fields":["password"]}}]}
 
-
 # Create a new User
+
 ===================
 $ curl -X POST http://localhost:8080/ycrpc.v1.YCRPCService/Signup \
-  -H "Content-Type: application/json" \
-  -d '{
-    "full_name": "John Doe",
-    "email": "john.doe@example.com",
-    "password": "passwordstronger",
-    "region": "REGION_USA"
-  }'
+ -H "Content-Type: application/json" \
+ -d '{
+"full_name": "John Doe",
+"email": "john.doe@example.com",
+"password": "passwordstronger",
+"region": "REGION_USA"
+}'
 
 {"handle":"johndo-1760982292cd4cb4abe0b1-usa"}
 
-
 # Failure to create duplicate user
+
 ==================================
 $ curl -X POST http://localhost:8080/ycrpc.v1.YCRPCService/Signup \
-  -H "Content-Type: application/json" \
-  -d '{
-    "full_name": "John Doe",
-    "email": "john.doe@example.com",
-    "password": "passwordstronger",
-    "region": "REGION_USA"
-  }'
+ -H "Content-Type: application/json" \
+ -d '{
+"full_name": "John Doe",
+"email": "john.doe@example.com",
+"password": "passwordstronger",
+"region": "REGION_USA"
+}'
 
 {"code":"already_exists","message":"user with this email address already exists"}
-```
+
+````
 
 ## Database Access
 
@@ -64,7 +73,7 @@ $ docker exec -it yugabytedb-node1 ysqlsh -h yugabytedb-node1 -U yugabyte
 $ docker exec -it yugabytedb-node2 ysqlsh -h yugabytedb-node2 -U yugabyte
 $ docker exec -it yugabytedb-node3 ysqlsh -h yugabytedb-node3 -U yugabyte
 $ docker exec -it yugabytedb-node4 ysqlsh -h yugabytedb-node4 -U yugabyte
-```
+````
 
 ### Explore Sample Data
 
@@ -106,14 +115,68 @@ You can also access the YugabyteDB web interfaces:
 
 ## IDE Support
 
+For local development with proper IDE code navigation, you need to generate the protobuf code locally:
+
 ```bash
-# Install tools once
+# Install tools once (run from project root)
 $ go install github.com/bufbuild/buf/cmd/buf@latest
 $ go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
 $ go install connectrpc.com/connect/cmd/protoc-gen-connect-go@latest
 $ go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
 
-# Generate the libraries
-$ cd proto && rm -rf gen && buf lint && buf generate
-$ cd sqlc && sqlc generate
+# Install TypeScript protobuf code generators (v2 - protoc-gen-connect-es not needed in Connect v2)
+$ npm install -g @bufbuild/protoc-gen-es@^2.2.0
+
+# From project root directory:
+# Generate Go protobuf libraries (outputs to go/gen/)
+$ cd proto && buf lint && buf generate --template buf.gen.go.yaml && cd ..
+
+# Generate TypeScript protobuf libraries (outputs to ui/app/gen/)
+$ cd proto && buf generate --template buf.gen.ts.yaml && cd ..
+
+# Generate SQLC database code (outputs to go/sqlc/db/)
+$ cd go/sqlc && sqlc generate && cd ../..
+
+# Install Go dependencies
+$ cd go && go mod download && cd ..
+
+# Install UI dependencies
+$ cd ui && npm install && cd ..
 ```
+
+### Project Structure
+
+```
+ycrpc/
+├── Dockerfile-backend     # Backend Docker build
+├── Dockerfile-ui          # UI Docker build
+├── docker-compose.yaml    # Service orchestration
+├── proto/                 # Protobuf definitions
+│   ├── buf.gen.go.yaml    # Go code generation config
+│   ├── buf.gen.ts.yaml    # TypeScript code generation config
+│   └── ycrpc/v1/          # Proto files
+├── go/                    # Go backend application
+│   ├── go.mod            # Go module (module: ycrpc)
+│   ├── gen/              # Generated protobuf code (gitignored)
+│   ├── cmd/              # Application entry points
+│   ├── internal/         # Internal packages
+│   └── sqlc/             # Database code generation
+│       ├── db/           # Generated DB code (gitignored)
+│       ├── migrations/   # SQL schema migrations
+│       ├── queries/      # SQL queries for generation
+│       └── sqlc.yaml     # SQLC configuration
+└── ui/                    # React frontend application
+    ├── package.json      # Node.js dependencies
+    └── app/
+        └── gen/          # Generated protobuf code (gitignored)
+```
+
+### Generated Code Locations
+
+After running the code generation commands:
+
+- **Go protobuf code**: `go/gen/ycrpc/v1/`
+- **TypeScript protobuf code**: `ui/app/gen/ycrpc/v1/`
+- **Database access code**: `go/sqlc/db/`
+
+All generated directories are gitignored and will be regenerated during Docker builds.

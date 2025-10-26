@@ -9,6 +9,9 @@
     "typecheck": "react-router typegen && tsc"
   },
   "dependencies": {
+    "@bufbuild/protobuf": "^2.2.2",
+    "@connectrpc/connect": "^2.1.0",
+    "@connectrpc/connect-web": "^2.1.0",
     "@react-router/node": "^7.9.2",
     "@react-router/serve": "^7.9.2",
     "antd": "^5.27.6",

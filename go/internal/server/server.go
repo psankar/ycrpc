@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	ycrpcv1 "ycrpc/proto/gen/ycrpc/v1"
+	ycrpcv1 "ycrpc/gen/ycrpc/v1"
 	"ycrpc/sqlc/db"
 
 	"buf.build/go/protovalidate"

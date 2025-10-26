@@ -13,6 +13,19 @@ services:
     networks:
       - ycrpc-network
 
+  ycrpc-ui:
+    build:
+      context: .
+      dockerfile: Dockerfile-ui
+    ports:
+      - "3000:3000"
+    depends_on:
+      - ycrpc-backend
+    networks:
+      - ycrpc-network
+    environment:
+      - NODE_ENV=production
+
   # Database Migrations
   ycrpc-migrations:
     image: postgres:15
@@ -32,7 +45,7 @@ services:
         fi
       '
     volumes:
-      - ./sqlc/migrations:/migrations:ro
+      - ./go/sqlc/migrations:/migrations:ro
     environment:
       - PGPASSWORD=yugabyte
     depends_on:
