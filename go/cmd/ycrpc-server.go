@@ -4,8 +4,8 @@ import (
 	"log"
 	"net/http"
 
-	"ycrpc/go/internal/server"
-	"ycrpc/proto/gen/ycrpc/v1/ycrpcv1connect"
+	"ycrpc/gen/ycrpc/v1/ycrpcv1connect"
+	"ycrpc/internal/server"
 )
 
 func main() {

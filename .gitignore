@@ -1,5 +1,9 @@
-proto/gen
-sqlc/db
+# Generated code (automatically regenerated)
+go/gen/
+go/sqlc/db/
+ui/app/gen/
+
+# Docker volumes
 vol-*
 
 # If you prefer the allow list template instead of the deny list, see community template:

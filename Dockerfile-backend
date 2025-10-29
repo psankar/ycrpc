@@ -10,33 +10,36 @@ RUN apk add --no-cache git
 WORKDIR /app
 
 # Copy go mod files first for better caching
-COPY go.mod go.sum ./
+COPY go/go.mod go/go.sum ./go/
+WORKDIR /app/go
 RUN go mod download
 
-# sqlc
-RUN go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
-# Install buf and required protoc plugins
-RUN go install github.com/bufbuild/buf/cmd/buf@latest && \
+# Install code generation tools
+WORKDIR /app
+RUN go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest && \
+  go install github.com/bufbuild/buf/cmd/buf@latest && \
   go install google.golang.org/protobuf/cmd/protoc-gen-go@latest && \
   go install connectrpc.com/connect/cmd/protoc-gen-connect-go@latest
 
 # Copy SQLC files and generate libraries
-COPY sqlc/ ./sqlc/
-WORKDIR /app/sqlc
+COPY go/sqlc/ ./go/sqlc/
+WORKDIR /app/go/sqlc
 RUN sqlc generate
 
 # Copy proto files and buf configuration
 WORKDIR /app
 COPY proto/ ./proto/
 WORKDIR /app/proto
-RUN buf dep update && buf lint && buf generate
+RUN buf dep update && buf lint && buf generate --template buf.gen.go.yaml
 
-# Copy the rest of the application
+# Copy the rest of the Go application code (after code generation)
 WORKDIR /app
-COPY go/ ./go/
+COPY go/cmd/ ./go/cmd/
+COPY go/internal/ ./go/internal/
 
 # Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o ycrpc-server ./go/cmd/ycrpc-server.go
+WORKDIR /app/go
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o ycrpc-server ./cmd/ycrpc-server.go
 
 # Stage 2: Final minimal image
 FROM alpine:latest
@@ -51,7 +54,7 @@ RUN addgroup -g 1000 appgroup && \
 WORKDIR /app
 
 # Copy the binary from builder stage
-COPY --from=builder /app/ycrpc-server .
+COPY --from=builder /app/go/ycrpc-server .
 
 # Change ownership to non-root user
 RUN chown appuser:appgroup /app/ycrpc-server
