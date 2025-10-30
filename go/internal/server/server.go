@@ -35,11 +35,6 @@ func NewServer() (*server, error) {
 		databaseURL = "postgres://yugabyte:yugabyte@yugabytedb-node1:5433,yugabytedb-node2:5433,yugabytedb-node3:5433,yugabytedb-node4:5433/yugabyte"
 	}
 
-	// Enable YugabyteDB smart driver features for geo-partitioning
-	// load_balance=true enables cluster-aware load balancing
-	// yb_servers_refresh_interval refreshes the server list periodically
-	// databaseURL += "?load_balance=true&yb_servers_refresh_interval=300"
-
 	// Create connection pool with YugabyteDB smart driver
 	pool, err := pgxpool.New(context.Background(), databaseURL)
 	if err != nil {

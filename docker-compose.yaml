@@ -6,10 +6,12 @@ services:
     ports:
       - "8080:8080"
     depends_on:
+      yugabyte-postinstall-setup:
+        condition: service_completed_successfully
       ycrpc-migrations:
         condition: service_completed_successfully
     environment:
-      - DATABASE_URL=postgres://yugabyte:yugabyte@yugabytedb-node1:5433,yugabytedb-node2:5433,yugabytedb-node3:5433,yugabytedb-node4:5433/yugabyte
+      - DATABASE_URL=postgres://yugabyte:yugabyte@yb-tserver-usa:5433,yb-tserver-eur:5433,yb-tserver-ind:5433,yb-tserver-sgp:5433/yugabyte
     networks:
       - ycrpc-network
 
@@ -26,18 +28,49 @@ services:
     environment:
       - NODE_ENV=production
 
-  # Database Migrations
+  # Tablespace Setup (must run first, after cluster initialization)
+  yugabyte-postinstall-setup:
+    image: postgres:15
+    container_name: yugabyte-postinstall-setup
+    command: |
+      bash -c '
+        set -e
+        echo "Waiting 30 seconds for YugabyteDB cluster to be ready..."
+        sleep 30
+        
+        echo "Creating tablespaces..."
+        if psql -h yb-tserver-usa -p 5433 -U yugabyte -d yugabyte -v ON_ERROR_STOP=1 -f /setup/setup-tablespaces.sql; then
+          echo "Tablespaces created successfully!"
+        else
+          echo "ERROR: Tablespace creation failed!"
+          exit 1
+        fi
+      '
+    volumes:
+      - ./yugabyte-postinstall-setup:/setup:ro
+    environment:
+      - PGPASSWORD=yugabyte
+    depends_on:
+      - yb-master-1
+      - yb-master-2
+      - yb-master-3
+      - yb-tserver-usa
+      - yb-tserver-eur
+      - yb-tserver-ind
+      - yb-tserver-sgp
+    networks:
+      - ycrpc-network
+    restart: "no"
+
+  # Database Migrations (runs after tablespaces are created)
   ycrpc-migrations:
     image: postgres:15
     container_name: ycrpc-migrations
     command: |
       bash -c '
         set -e
-        echo "Waiting 45 seconds for YugabyteDB cluster to be ready..."
-        sleep 45
-        
         echo "Running migrations..."
-        if psql -h yugabytedb-node1 -p 5433 -U yugabyte -d yugabyte -v ON_ERROR_STOP=1 -f /migrations/initdb.sql; then
+        if psql -h yb-tserver-usa -p 5433 -U yugabyte -d yugabyte -v ON_ERROR_STOP=1 -f /migrations/initdb.sql; then
           echo "Migrations completed successfully!"
         else
           echo "ERROR: Migrations failed!"
@@ -49,89 +82,182 @@ services:
     environment:
       - PGPASSWORD=yugabyte
     depends_on:
-      - yugabytedb-node1
-      - yugabytedb-node2
-      - yugabytedb-node3
-      - yugabytedb-node4
+      yugabyte-postinstall-setup:
+        condition: service_completed_successfully
     networks:
       - ycrpc-network
     restart: "no"
 
-  # YugabyteDB Node 1 - USA Region
-  yugabytedb-node1:
+  # YugabyteDB Masters (3 for quorum)
+  yb-master-1:
     image: yugabytedb/yugabyte:latest
-    container_name: yugabytedb-node1
-    hostname: yugabytedb-node1
-    command: ["bin/yugabyted", "start", "--base_dir=/home/yugabyte/yb_data", "--background=false", "--cloud_location=local.usa.usa-a", "--fault_tolerance=region"]
+    container_name: yb-master-1
+    hostname: yb-master-1
+    command: [
+      "bin/yb-master",
+      "--fs_data_dirs=/mnt/disk0",
+      "--master_addresses=yb-master-1:7100,yb-master-2:7100,yb-master-3:7100",
+      "--replication_factor=1",
+      "--rpc_bind_addresses=yb-master-1:7100"
+    ]
     ports:
-      - "15433:15433"  # YSQL port
-      - "7001:7000"    # Master web UI
-      - "9001:9000"    # TServer web UI
-      - "5433:5433"    # PostgreSQL compatible port
+      - "7100:7100"
+      - "17000:7000"
     volumes:
-      - ./vol-usa:/home/yugabyte/yb_data
-    environment:
-      - YSQL_DB=yugabyte
-      - YSQL_USER=yugabyte
+      - ./vol-master-1:/mnt/disk0
     networks:
       - ycrpc-network
 
-  # YugabyteDB Node 2 - EUR Region  
-  yugabytedb-node2:
+  yb-master-2:
     image: yugabytedb/yugabyte:latest
-    container_name: yugabytedb-node2
-    hostname: yugabytedb-node2
-    command: ["sh", "-c", "sleep 10 && bin/yugabyted start --join=yugabytedb-node1 --base_dir=/home/yugabyte/yb_data --background=false --cloud_location=local.eur.eur-a --fault_tolerance=region"]
+    container_name: yb-master-2
+    hostname: yb-master-2
+    command: [
+      "bin/yb-master",
+      "--fs_data_dirs=/mnt/disk0",
+      "--master_addresses=yb-master-1:7100,yb-master-2:7100,yb-master-3:7100",
+      "--replication_factor=1",
+      "--rpc_bind_addresses=yb-master-2:7100"
+    ]
     ports:
-      - "15434:15433"  # YSQL port
-      - "7002:7000"    # Master web UI
-      - "9002:9000"    # TServer web UI
-      - "5434:5433"    # PostgreSQL compatible port
+      - "7101:7100"
+      - "17001:7000"
     volumes:
-      - ./vol-eur:/home/yugabyte/yb_data
+      - ./vol-master-2:/mnt/disk0
     depends_on:
-      - yugabytedb-node1
+      - yb-master-1
     networks:
       - ycrpc-network
-    restart: on-failure
 
-  # YugabyteDB Node 3 - IND Region
-  yugabytedb-node3:
+  yb-master-3:
     image: yugabytedb/yugabyte:latest
-    container_name: yugabytedb-node3
-    hostname: yugabytedb-node3
-    command: ["sh", "-c", "sleep 10 && bin/yugabyted start --join=yugabytedb-node1 --base_dir=/home/yugabyte/yb_data --background=false --cloud_location=local.ind.ind-a --fault_tolerance=region"]
+    container_name: yb-master-3
+    hostname: yb-master-3
+    command: [
+      "bin/yb-master",
+      "--fs_data_dirs=/mnt/disk0",
+      "--master_addresses=yb-master-1:7100,yb-master-2:7100,yb-master-3:7100",
+      "--replication_factor=1",
+      "--rpc_bind_addresses=yb-master-3:7100"
+    ]
     ports:
-      - "15435:15433"  # YSQL port
-      - "7003:7000"    # Master web UI
-      - "9003:9000"    # TServer web UI
-      - "5435:5433"    # PostgreSQL compatible port
+      - "7102:7100"
+      - "17002:7000"
     volumes:
-      - ./vol-ind:/home/yugabyte/yb_data
+      - ./vol-master-3:/mnt/disk0
     depends_on:
-      - yugabytedb-node1
+      - yb-master-1
     networks:
       - ycrpc-network
-    restart: on-failure
 
-  # YugabyteDB Node 4 - SGP Region
-  yugabytedb-node4:
+  # YugabyteDB TServers (1 per region)
+  yb-tserver-usa:
     image: yugabytedb/yugabyte:latest
-    container_name: yugabytedb-node4
-    hostname: yugabytedb-node4
-    command: ["sh", "-c", "sleep 10 && bin/yugabyted start --join=yugabytedb-node1 --base_dir=/home/yugabyte/yb_data --background=false --cloud_location=local.sgp.sgp-a --fault_tolerance=region"]
+    container_name: yb-tserver-usa
+    hostname: yb-tserver-usa
+    command: [
+      "bin/yb-tserver",
+      "--fs_data_dirs=/mnt/disk0",
+      "--tserver_master_addrs=yb-master-1:7100,yb-master-2:7100,yb-master-3:7100",
+      "--rpc_bind_addresses=yb-tserver-usa:9100",
+      "--pgsql_proxy_bind_address=yb-tserver-usa:5433",
+      "--placement_cloud=local",
+      "--placement_region=usa",
+      "--placement_zone=usa-a"
+    ]
     ports:
-      - "15436:15433"  # YSQL port
-      - "7004:7000"    # Master web UI
-      - "9004:9000"    # TServer web UI
-      - "5436:5433"    # PostgreSQL compatible port
+      - "5433:5433"
+      - "9100:9100"
+      - "19000:9000"
     volumes:
-      - ./vol-sgp:/home/yugabyte/yb_data
+      - ./vol-usa:/mnt/disk0
     depends_on:
-      - yugabytedb-node1
+      - yb-master-1
+      - yb-master-2
+      - yb-master-3
     networks:
       - ycrpc-network
-    restart: on-failure
+
+  yb-tserver-eur:
+    image: yugabytedb/yugabyte:latest
+    container_name: yb-tserver-eur
+    hostname: yb-tserver-eur
+    command: [
+      "bin/yb-tserver",
+      "--fs_data_dirs=/mnt/disk0",
+      "--tserver_master_addrs=yb-master-1:7100,yb-master-2:7100,yb-master-3:7100",
+      "--rpc_bind_addresses=yb-tserver-eur:9100",
+      "--pgsql_proxy_bind_address=yb-tserver-eur:5433",
+      "--placement_cloud=local",
+      "--placement_region=eur",
+      "--placement_zone=eur-a"
+    ]
+    ports:
+      - "5434:5433"
+      - "9101:9100"
+      - "19001:9000"
+    volumes:
+      - ./vol-eur:/mnt/disk0
+    depends_on:
+      - yb-master-1
+      - yb-master-2
+      - yb-master-3
+    networks:
+      - ycrpc-network
+
+  yb-tserver-ind:
+    image: yugabytedb/yugabyte:latest
+    container_name: yb-tserver-ind
+    hostname: yb-tserver-ind
+    command: [
+      "bin/yb-tserver",
+      "--fs_data_dirs=/mnt/disk0",
+      "--tserver_master_addrs=yb-master-1:7100,yb-master-2:7100,yb-master-3:7100",
+      "--rpc_bind_addresses=yb-tserver-ind:9100",
+      "--pgsql_proxy_bind_address=yb-tserver-ind:5433",
+      "--placement_cloud=local",
+      "--placement_region=ind",
+      "--placement_zone=ind-a"
+    ]
+    ports:
+      - "5435:5433"
+      - "9102:9100"
+      - "19002:9000"
+    volumes:
+      - ./vol-ind:/mnt/disk0
+    depends_on:
+      - yb-master-1
+      - yb-master-2
+      - yb-master-3
+    networks:
+      - ycrpc-network
+
+  yb-tserver-sgp:
+    image: yugabytedb/yugabyte:latest
+    container_name: yb-tserver-sgp
+    hostname: yb-tserver-sgp
+    command: [
+      "bin/yb-tserver",
+      "--fs_data_dirs=/mnt/disk0",
+      "--tserver_master_addrs=yb-master-1:7100,yb-master-2:7100,yb-master-3:7100",
+      "--rpc_bind_addresses=yb-tserver-sgp:9100",
+      "--pgsql_proxy_bind_address=yb-tserver-sgp:5433",
+      "--placement_cloud=local",
+      "--placement_region=sgp",
+      "--placement_zone=sgp-a"
+    ]
+    ports:
+      - "5436:5433"
+      - "9103:9100"
+      - "19003:9000"
+    volumes:
+      - ./vol-sgp:/mnt/disk0
+    depends_on:
+      - yb-master-1
+      - yb-master-2
+      - yb-master-3
+    networks:
+      - ycrpc-network
 
 networks:
   ycrpc-network:

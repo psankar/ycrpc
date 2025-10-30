@@ -13,19 +13,19 @@ CREATE TABLE users (
 
 CREATE TABLE users_usa PARTITION OF users
     (CONSTRAINT uniq_handle_usa UNIQUE(region, long_handle))
-    FOR VALUES IN ('usa');
+    FOR VALUES IN ('usa') TABLESPACE usa_tablespace;
 
 CREATE TABLE users_eur PARTITION OF users
     (CONSTRAINT uniq_handle_eur UNIQUE(region, long_handle))
-    FOR VALUES IN ('eur');
+    FOR VALUES IN ('eur') TABLESPACE eur_tablespace;
 
 CREATE TABLE users_ind PARTITION OF users
     (CONSTRAINT uniq_handle_ind UNIQUE(region, long_handle))
-    FOR VALUES IN ('ind');
+    FOR VALUES IN ('ind') TABLESPACE ind_tablespace;
 
 CREATE TABLE users_sgp PARTITION OF users
     (CONSTRAINT uniq_handle_sgp UNIQUE(region, long_handle))
-    FOR VALUES IN ('sgp');
+    FOR VALUES IN ('sgp') TABLESPACE sgp_tablespace;
 
 CREATE TABLE global_email_addresses (
     email_address_sha TEXT PRIMARY KEY NOT NULL,
