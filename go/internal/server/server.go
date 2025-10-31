@@ -114,6 +114,16 @@ func (s *server) Signup(ctx context.Context, req *ycrpcv1.SignupRequest) (*ycrpc
 		return nil, connect.NewError(connect.CodeInternal, errors.New(""))
 	}
 
+	ctx, _ = context.WithTimeout(ctx, 5*time.Second)
+
+	conn, err := s.pool.Acquire(ctx)
+	if err != nil {
+		slog.Error("failed to acquire connection from pool", "error", err)
+		return nil, connect.NewError(connect.CodeInternal, errors.New(""))
+	}
+	defer conn.Release()
+	slog.Debug("acquired connection from pool", "conn", conn)
+
 	// Start a transaction so we insert into users and global_email_addresses atomically.
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -127,7 +137,7 @@ func (s *server) Signup(ctx context.Context, req *ycrpcv1.SignupRequest) (*ycrpc
 		}
 	}()
 
-	queries := db.New(s.pool).WithTx(tx)
+	queries := db.New(tx)
 
 	// Insert user and return generated id
 	userID, err := queries.InsertUser(ctx, db.InsertUserParams{
