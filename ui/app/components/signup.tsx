@@ -3,7 +3,7 @@ import { Button, Form, Input, Select, message } from "antd";
 import { createClient } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-web";
 import { create } from "@bufbuild/protobuf";
-import { createValidator } from "@bufbuild/protovalidate";
+import { createStandardSchema } from "@bufbuild/protovalidate";
 import {
   YCRPCService,
   Region,
@@ -18,6 +18,17 @@ type FieldType = {
   region: Region;
 };
 
+// Define the StandardSchema Issue type locally (from the spec)
+// The path can contain PathSegment objects in addition to PropertyKey
+interface PathSegment {
+  readonly key: PropertyKey;
+}
+
+interface StandardSchemaIssue {
+  readonly message: string;
+  readonly path?: ReadonlyArray<PropertyKey | PathSegment> | undefined;
+}
+
 // Create the Connect transport
 const transport = createConnectTransport({
   baseUrl: "http://localhost:8080",
@@ -26,20 +37,81 @@ const transport = createConnectTransport({
 // Create the client (Connect-ES v2 API)
 const client = createClient(YCRPCService, transport);
 
-// Create the validator
-const validator = createValidator();
-
-// Get field descriptors from schema for type-safe field access
-const fullNameField = SignupRequestSchema.field.fullName;
-const emailField = SignupRequestSchema.field.email;
-const passwordField = SignupRequestSchema.field.password;
-const regionField = SignupRequestSchema.field.region;
+// Create a StandardSchema-compliant validator
+const signupSchema = createStandardSchema(SignupRequestSchema);
 
 const SignupForm = () => {
   const [loading, setLoading] = useState(false);
   const [form] = Form.useForm<FieldType>();
 
+  const validateField = async (
+    fieldName: keyof FieldType,
+    protoFieldName: string,
+    value: any
+  ) => {
+    // Don't validate empty values on blur; Ant Design's "required" rule handles that on submit.
+    if (value === undefined || value === null || value === "") {
+      form.setFields([{ name: fieldName, errors: [] }]);
+      return;
+    }
+
+    // The protovalidate-ts library does not check min_len/max_len on partial
+    // messages. To work around this, we must build a complete message, but we
+    // only want to show errors for the field being blurred.
+    // We fill other fields with valid dummy data to ensure the validator
+    // performs a full check without reporting errors for other empty fields.
+    const currentValues = form.getFieldsValue();
+    const request = create(SignupRequestSchema, {
+      fullName:
+        protoFieldName === "fullName"
+          ? value
+          : currentValues.full_name || "Dummy Name", // Valid dummy
+      email:
+        protoFieldName === "email"
+          ? value
+          : currentValues.email || "dummy@dummy.com", // Valid dummy
+      password:
+        protoFieldName === "password"
+          ? value
+          : currentValues.password || "dummypassword", // Valid dummy
+      region:
+        protoFieldName === "region"
+          ? value
+          : currentValues.region || Region.USA, // Valid dummy
+    });
+
+    try {
+      const resolvedResult = await Promise.resolve(
+        signupSchema["~standard"].validate(request)
+      );
+
+      if ("issues" in resolvedResult && resolvedResult.issues) {
+        // Filter for errors related ONLY to the current field.
+        const fieldErrors = resolvedResult.issues
+          .filter((issue: StandardSchemaIssue) => {
+            const path = issue.path?.[0];
+            return path === protoFieldName;
+          })
+          .map((issue: StandardSchemaIssue) => issue.message);
+
+        form.setFields([{ name: fieldName, errors: fieldErrors }]);
+      } else {
+        // No issues found, clear any existing errors for the field.
+        form.setFields([{ name: fieldName, errors: [] }]);
+      }
+    } catch (err) {
+      console.error(
+        `[validateField] An unexpected error occurred for ${fieldName}:`,
+        err
+      );
+      form.setFields([
+        { name: fieldName, errors: ["Validation check failed."] },
+      ]);
+    }
+  };
+
   const handleSubmit = async (values: FieldType) => {
+    console.log("[handleSubmit] Called with values:", values);
     setLoading(true);
     try {
       // Create the protobuf message
@@ -49,27 +121,33 @@ const SignupForm = () => {
         password: values.password,
         region: values.region,
       });
+      console.log("[handleSubmit] Created request:", request);
 
-      // Validate using buf.validate rules from the proto file
-      const validationResult = validator.validate(SignupRequestSchema, request);
-      if (validationResult.kind !== "valid") {
-        // Map protobuf validation errors to form fields
-        const fieldErrors: Record<keyof FieldType, string[]> = {} as Record<
-          keyof FieldType,
-          string[]
-        >;
+      // Validate using StandardSchema
+      const validationResult = await Promise.resolve(
+        signupSchema["~standard"].validate(request)
+      );
+      console.log("[handleSubmit] Validation result:", validationResult);
 
-        validationResult.violations?.forEach((violation) => {
-          const field = violation.field[0];
+      if ("issues" in validationResult && validationResult.issues) {
+        console.log(
+          "[handleSubmit] Validation failed with issues:",
+          validationResult.issues
+        );
+        // Map validation errors to form fields
+        const fieldErrors: Record<string, string[]> = {};
+
+        validationResult.issues.forEach((issue: StandardSchemaIssue) => {
+          const path = issue.path?.[0];
           let formFieldName: keyof FieldType | undefined;
 
-          if (field === fullNameField) {
+          if (path === "full_name") {
             formFieldName = "full_name";
-          } else if (field === emailField) {
+          } else if (path === "email") {
             formFieldName = "email";
-          } else if (field === passwordField) {
+          } else if (path === "password") {
             formFieldName = "password";
-          } else if (field === regionField) {
+          } else if (path === "region") {
             formFieldName = "region";
           }
 
@@ -77,7 +155,7 @@ const SignupForm = () => {
             if (!fieldErrors[formFieldName]) {
               fieldErrors[formFieldName] = [];
             }
-            fieldErrors[formFieldName].push(violation.message);
+            fieldErrors[formFieldName].push(issue.message);
           }
         });
 
@@ -90,19 +168,26 @@ const SignupForm = () => {
         );
 
         if (formErrors.length > 0) {
+          console.log("[handleSubmit] Setting form errors:", formErrors);
           form.setFields(formErrors);
         } else {
+          console.log(
+            "[handleSubmit] Validation failed but no field errors mapped"
+          );
           message.error("Validation failed");
         }
         return;
       }
 
+      console.log("[handleSubmit] Validation passed, calling backend API");
       // Call the backend API with the validated request
       const response = await client.signup(request);
+      console.log("[handleSubmit] Backend response:", response);
 
       message.success(`Signup successful! Your handle is: ${response.handle}`);
       console.log("Signup response:", response);
     } catch (error: any) {
+      console.error("[handleSubmit] Error caught:", error);
       // Handle Connect errors
       if (error.code) {
         if (error.code === "invalid_argument") {
@@ -118,7 +203,8 @@ const SignupForm = () => {
         } else {
           message.error(`Error: ${error.message || "Unknown error"}`);
         }
-      } else {
+      }
+      else {
         message.error("Failed to signup. Please try again.");
         console.error("Signup error:", error);
       }
@@ -130,7 +216,7 @@ const SignupForm = () => {
   const onFinishFailed: FormProps<FieldType>["onFinishFailed"] = (
     errorInfo
   ) => {
-    console.log("Failed:", errorInfo);
+    console.log("[onFinishFailed] Form validation failed:", errorInfo);
   };
 
   return (
@@ -143,83 +229,57 @@ const SignupForm = () => {
       style={{ maxWidth: 600 }}
       autoComplete="off"
     >
-      <Form.Item<FieldType> label="Full Name" name="full_name">
+      <Form.Item<FieldType>
+        label="Full Name"
+        name="full_name"
+        validateStatus=""
+        hasFeedback
+      >
         <Input
           placeholder="John Doe"
-          onBlur={(e) => {
-            const value = e.target.value;
-            const request = create(SignupRequestSchema, { fullName: value });
-            const result = validator.validate(SignupRequestSchema, request);
-            if (result.kind !== "valid") {
-              const errors =
-                result.violations
-                  ?.filter((v) => v.field[0] === fullNameField)
-                  .map((v) => v.message) || [];
-              form.setFields([{ name: "full_name", errors }]);
-            } else {
-              form.setFields([{ name: "full_name", errors: [] }]);
-            }
-          }}
+          onBlur={(e) =>
+            void validateField("full_name", "full_name", e.target.value)
+          }
         />
       </Form.Item>
 
-      <Form.Item<FieldType> label="Email" name="email">
+      <Form.Item<FieldType>
+        label="Email"
+        name="email"
+        validateStatus=""
+        hasFeedback
+      >
         <Input
           placeholder="john.doe@example.com"
-          onBlur={(e) => {
-            const value = e.target.value;
-            const request = create(SignupRequestSchema, { email: value });
-            const result = validator.validate(SignupRequestSchema, request);
-            if (result.kind !== "valid") {
-              const errors =
-                result.violations
-                  ?.filter((v) => v.field[0] === emailField)
-                  .map((v) => v.message) || [];
-              form.setFields([{ name: "email", errors }]);
-            } else {
-              form.setFields([{ name: "email", errors: [] }]);
-            }
-          }}
+          onBlur={(e) => void validateField("email", "email", e.target.value)}
         />
       </Form.Item>
 
-      <Form.Item<FieldType> label="Password" name="password">
+      <Form.Item<FieldType>
+        label="Password"
+        name="password"
+        validateStatus=""
+        hasFeedback
+      >
         <Input.Password
           placeholder="Enter a strong password"
-          onBlur={(e) => {
-            const value = e.target.value;
-            const request = create(SignupRequestSchema, { password: value });
-            const result = validator.validate(SignupRequestSchema, request);
-            if (result.kind !== "valid") {
-              const errors =
-                result.violations
-                  ?.filter((v) => v.field[0] === passwordField)
-                  .map((v) => v.message) || [];
-              form.setFields([{ name: "password", errors }]);
-            } else {
-              form.setFields([{ name: "password", errors: [] }]);
-            }
-          }}
+          onBlur={(e) =>
+            void validateField("password", "password", e.target.value)
+          }
         />
       </Form.Item>
 
-      <Form.Item<FieldType> label="Region" name="region">
+      <Form.Item<FieldType>
+        label="Region"
+        name="region"
+        validateStatus=""
+        hasFeedback
+      >
         <Select
           placeholder="Select a region"
-          onBlur={() => {
-            const value = form.getFieldValue("region");
-            const request = create(SignupRequestSchema, { region: value });
-            const result = validator.validate(SignupRequestSchema, request);
-            if (result.kind !== "valid") {
-              const errors =
-                result.violations
-                  ?.filter((v) => v.field[0] === regionField)
-                  .map((v) => v.message) || [];
-              form.setFields([{ name: "region", errors }]);
-            } else {
-              form.setFields([{ name: "region", errors: [] }]);
-            }
-          }}
+          onBlur={() =>
+            void validateField("region", "region", form.getFieldValue("region"))
+          }
           onChange={(value) => form.setFieldValue("region", value)}
         >
           <Select.Option value={Region.USA}>USA</Select.Option>

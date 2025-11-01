@@ -16,12 +16,8 @@ enum Region {
 
 message SignupRequest {
   string full_name = 1 [(buf.validate.field).string = {
-    min_len: 2
-    max_len: 100
-    // Support Unicode letters, spaces, hyphens, apostrophes, and periods
-    // No leading/trailing spaces, no multiple consecutive spaces
-    // Allows names in any language/script (Unicode letters)
-    pattern: "^[\\p{L}][\\p{L}\\s'\\-\\.]*[\\p{L}]$"
+    min_len: 2;
+    max_len: 100;
   }];
 
   string email = 2 [(buf.validate.field).string.email = true];
