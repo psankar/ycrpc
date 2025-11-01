@@ -63,7 +63,7 @@ const SignupForm = () => {
     const currentValues = form.getFieldsValue();
     const request = create(SignupRequestSchema, {
       fullName:
-        protoFieldName === "fullName"
+        protoFieldName === "full_name"
           ? value
           : currentValues.full_name || "Dummy Name", // Valid dummy
       email:
