@@ -114,33 +114,28 @@ func (s *server) Signup(ctx context.Context, req *ycrpcv1.SignupRequest) (*ycrpc
 		return nil, connect.NewError(connect.CodeInternal, errors.New(""))
 	}
 
-	ctx, _ = context.WithTimeout(ctx, 5*time.Second)
+	timedCtx, cancelFunc := context.WithTimeout(ctx, 5*time.Second)
+	defer cancelFunc()
 
-	conn, err := s.pool.Acquire(ctx)
+	conn, err := s.pool.Acquire(timedCtx)
 	if err != nil {
 		slog.Error("failed to acquire connection from pool", "error", err)
 		return nil, connect.NewError(connect.CodeInternal, errors.New(""))
 	}
 	defer conn.Release()
-	slog.Debug("acquired connection from pool", "conn", conn)
 
 	// Start a transaction so we insert into users and global_email_addresses atomically.
-	tx, err := s.pool.Begin(ctx)
+	tx, err := s.pool.Begin(timedCtx)
 	if err != nil {
 		slog.Error("failed to begin transaction", "error", err)
 		return nil, connect.NewError(connect.CodeInternal, errors.New(""))
 	}
-	// Ensure rollback if anything goes wrong. If commit succeeds we'll set tx = nil to avoid rollback.
-	defer func() {
-		if tx != nil {
-			_ = tx.Rollback(ctx)
-		}
-	}()
+	defer tx.Rollback(context.Background())
 
 	queries := db.New(tx)
 
 	// Insert user and return generated id
-	userID, err := queries.InsertUser(ctx, db.InsertUserParams{
+	userID, err := queries.InsertUser(timedCtx, db.InsertUserParams{
 		Region:       region,
 		LongHandle:   handle,
 		FullName:     req.FullName,
@@ -152,7 +147,7 @@ func (s *server) Signup(ctx context.Context, req *ycrpcv1.SignupRequest) (*ycrpc
 			if pgErr.Code == "23505" {
 				if pgErr.ConstraintName == "uniq_handle" {
 					slog.Error("duplicate long_handle generated", "handle", handle)
-					return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("user with this handle already exists"))
+					return nil, connect.NewError(connect.CodeInternal, errors.New(""))
 				} else {
 					slog.Error("unknown unique violation", "constraint", pgErr.ConstraintName, "error", err)
 					return nil, connect.NewError(connect.CodeInternal, errors.New(""))
@@ -169,7 +164,7 @@ func (s *server) Signup(ctx context.Context, req *ycrpcv1.SignupRequest) (*ycrpc
 	emailSha := hex.EncodeToString(sum[:])
 
 	// Insert into global_email_addresses to enforce a global-unique email across regions
-	err = queries.InsertGlobalEmail(ctx, db.InsertGlobalEmailParams{
+	err = queries.InsertGlobalEmail(timedCtx, db.InsertGlobalEmailParams{
 		EmailAddressSha: emailSha,
 		Region:          region,
 		UserID:          userID,
@@ -186,12 +181,10 @@ func (s *server) Signup(ctx context.Context, req *ycrpcv1.SignupRequest) (*ycrpc
 	}
 
 	// Commit the transaction
-	if err := tx.Commit(ctx); err != nil {
+	if err := tx.Commit(context.Background()); err != nil {
 		slog.Error("failed to commit transaction", "error", err)
 		return nil, connect.NewError(connect.CodeInternal, errors.New(""))
 	}
-	// Mark tx as nil so deferred rollback doesn't run
-	tx = nil
 
 	slog.Info("user created successfully", "handle", handle, "region", regionStr)
 	return &ycrpcv1.SignupResponse{Handle: handle}, nil
